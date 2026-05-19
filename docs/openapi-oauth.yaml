@@ -92,10 +92,13 @@ paths:
       summary: Introspect access token
       description: |
         Validates an access token and returns its associated claims.
-        Protected with mTLS and requires bearer token authentication.
+        Protected with mTLS. The introspecting client can authenticate either
+        with an existing bearer token in the Authorization header or with
+        `private_key_jwt` fields directly in the form body.
       security:
         - mutualTLS: []
-        - bearerAuth: []
+          bearerAuth: []
+        - mutualTLS: []
       requestBody:
         required: true
         content:
@@ -104,9 +107,16 @@ paths:
               $ref: '#/components/schemas/IntrospectionRequest'
             examples:
               introspectionRequest:
-                summary: Introspect opaque access token
+                summary: Introspect opaque access token with bearer auth
                 value:
                   token: 2f1b8b7e-2d1a-4b0b-9e9a-9f02a7b3b6a1
+              privateKeyJwtIntrospection:
+                summary: Introspect opaque access token with private_key_jwt
+                value:
+                  client_assertion_type: urn:ietf:params:oauth:client-assertion-type:jwt-bearer
+                  client_assertion: eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCIsImtpZCI6IjEifQ.eyJpc3MiOiJodHRwOi8vcGNtLmZoaXIuaGVhbHRoLmdvdi5pbC9Pcmdhbml6YXRpb24vb3JnLXZhY2NpbmUtcmVwbyIsInN1YiI6Imh0dHA6Ly9wY20uZmhpci5oZWFsdGguZ292LmlsL09yZ2FuaXphdGlvbi9vcmctdmFjY2luZS1yZXBvIiwiYXVkIjoiaHR0cHM6Ly9wY20uZmhpci5oZWFsdGguZ292LmlsL2ludHJvc3BlY3QiLCJqdGkiOiJkMDFmYTZhNC1iYjkwLTRiODUtODBmZi1hN2ZlZDc1Zjk2YzAiLCJpYXQiOjE3MDY2NDAwMDAsImV4cCI6MTcwNjY0MDMwMH0.ExampleSignature
+                  token: 2f1b8b7e-2d1a-4b0b-9e9a-9f02a7b3b6a1
+                  token_type_hint: access_token
       responses:
         '200':
           description: Introspection response
@@ -214,6 +224,24 @@ components:
         token:
           type: string
           description: Token to introspect.
+        token_type_hint:
+          type: string
+          description: Optional OAuth2 token type hint. `access_token` is accepted and ignored by the current implementation.
+        client_assertion_type:
+          type: string
+          enum: [urn:ietf:params:oauth:client-assertion-type:jwt-bearer]
+          description: Required when authenticating the introspection caller with private_key_jwt in the form body instead of bearer auth.
+        client_assertion:
+          type: string
+          description: |
+            Signed JWT (private_key_jwt) for introspection client authentication. Must be signed
+            with the private key corresponding to the mTLS client certificate.
+            Required claims match token endpoint client authentication:
+              - iss: Client ID (Organization URI)
+              - sub: Client ID (same as iss)
+              - aud: Introspection endpoint URL. The token endpoint URL is also accepted for compatibility with clients that reuse their token-endpoint audience.
+              - jti: Unique identifier
+              - iat/exp: Issued/expiration times (short-lived)
     IntrospectionResponse:
       type: object
       properties:

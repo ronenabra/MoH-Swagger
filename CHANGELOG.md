@@ -6,3 +6,4 @@
 
 ### Changed
 - OpenAPI documentation refreshed.
+- Documented `/introspect` support for `private_key_jwt` authentication aligned with `/token` client assertion requirements.
