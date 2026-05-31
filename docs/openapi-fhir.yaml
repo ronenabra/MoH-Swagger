@@ -2,12 +2,25 @@ openapi: 3.1.0
 info:
   title: PCM FHIR API
   version: "2026-01-05"
+  license:
+    name: Apache-2.0
+    url: https://www.apache.org/licenses/LICENSE-2.0.html
   description: |
     OpenAPI definition for the PCM FHIR server. This covers the external FHIR REST API
     interactions described in pcm_process_flow.md, including organization onboarding
-    updates, service registration, consent creation and retrieval, approvals, and
-    endpoint registration. Examples mirror the FHIR examples under input/fsh/_Examples.
+    updates, service registration, consent creation and retrieval, and endpoint
+    registration. Service governance workflows are outside this public FHIR API;
+    their observable API outcome is reflected by HealthcareService.active and
+    OperationOutcome responses.
+    Retrieval/response examples mirror the FHIR
+    examples under input/fsh/_Examples; submit examples show the smaller
+    server-accepted request bodies where those differ from full profiled
+    response resources.
     Unless otherwise noted, FHIR REST requests/responses use application/fhir+json.
+    PCM FHIR resource operations require transport-level mTLS and OAuth2 bearer
+    access tokens. OAuth2 client authentication for token issuance/introspection
+    is private_key_jwt; mTLS is not advertised as `tls_client_auth`. Profile-specific
+    constraints are defined by the FSH profiles and illustrated by the examples.
 servers:
   - url: https://pcm.fhir.health.gov.il/r4
     description: PCM FHIR base URL
@@ -18,29 +31,30 @@ tags:
   - name: Endpoint
     description: FHIR server endpoints for data sources.
   - name: HealthcareService
-    description: Canonical and instance service definitions.
+    description: Canonical catalog services and instance subscription services.
   - name: Consent
-    description: Consent requests and approvals. Deletion is not supported; service providers may only deactivate consents they created.
-  - name: VerificationResult
-    description: Approvals for service instances.
+    description: Consent requests and lifecycle updates. Deletion is not supported; service providers may only deactivate consents they created.
   - name: CapabilityStatement
     description: Server metadata and supported interactions.
   - name: SMART
     description: SMART on FHIR OAuth2 configuration.
 
 security:
-  - mutualTLS: []
-  - bearerAuth: []
+  - mtlsTransport: []
+    bearerAuth: []
 
 paths:
   /.well-known/smart-configuration:
+    servers:
+      - url: https://pcm.fhir.health.gov.il/r4
     get:
       tags: [SMART]
+      operationId: getSmartConfiguration
       summary: Read SMART on FHIR configuration
       description: |
         OAuth2/SMART discovery document for the PCM authorization server.
       security:
-        - mutualTLS: []
+        - mtlsTransport: []
       responses:
         '200':
           description: SMART configuration
@@ -51,17 +65,22 @@ paths:
               examples:
                 pcmSmartConfiguration:
                   $ref: '#/components/examples/SmartConfigurationPCM'
+        '401':
+          $ref: '#/components/responses/OperationOutcomeUnauthorized'
         default:
           $ref: '#/components/responses/OperationOutcomeError'
   /metadata:
+    servers:
+      - url: https://pcm.fhir.health.gov.il/r4
     get:
       tags: [CapabilityStatement]
+      operationId: readCapabilityStatement
       summary: Read capability statement
       description: |
         Returns the PCM server CapabilityStatement describing supported resources,
         interactions, and search parameters.
       security:
-        - mutualTLS: []
+        - mtlsTransport: []
       responses:
         '200':
           description: CapabilityStatement
@@ -81,8 +100,11 @@ paths:
         default:
           $ref: '#/components/responses/OperationOutcomeError'
   /Organization:
+    servers:
+      - url: https://pcm.fhir.health.gov.il/r4
     get:
       tags: [Organization]
+      operationId: searchOrganizations
       summary: Search organizations
       description: |
         Search organizations by supported parameters. Used for discovery and retrieval,
@@ -115,8 +137,11 @@ paths:
           $ref: '#/components/responses/OperationOutcomeError'
 
   /Organization/{id}:
+    servers:
+      - url: https://pcm.fhir.health.gov.il/r4
     get:
       tags: [Organization]
+      operationId: readOrganization
       summary: Read organization
       parameters:
         - $ref: '#/components/parameters/id'
@@ -146,8 +171,24 @@ paths:
           $ref: '#/components/responses/OperationOutcomeNotFound'
         default:
           $ref: '#/components/responses/OperationOutcomeError'
+    head:
+      tags: [Organization]
+      operationId: headOrganization
+      summary: Check organization existence
+      parameters:
+        - $ref: '#/components/parameters/id'
+      responses:
+        '200':
+          description: Organization exists.
+        '401':
+          description: Unauthorized.
+        '403':
+          description: Forbidden.
+        '404':
+          description: Organization not found.
     put:
       tags: [Organization]
+      operationId: updateOrganization
       summary: Update organization
       description: |
         Used by organizations to update allowed fields (contacts, endpoint reference,
@@ -193,8 +234,11 @@ paths:
           $ref: '#/components/responses/OperationOutcomeError'
 
   /Endpoint:
+    servers:
+      - url: https://pcm.fhir.health.gov.il/r4
     get:
       tags: [Endpoint]
+      operationId: searchEndpoints
       summary: Search endpoints
       parameters:
         - $ref: '#/components/parameters/_id'
@@ -256,6 +300,8 @@ paths:
           $ref: '#/components/responses/OperationOutcomeError'
 
   /Endpoint/{id}:
+    servers:
+      - url: https://pcm.fhir.health.gov.il/r4
     get:
       tags: [Endpoint]
       operationId: readEndpoint
@@ -284,8 +330,24 @@ paths:
           $ref: '#/components/responses/OperationOutcomeNotFound'
         default:
           $ref: '#/components/responses/OperationOutcomeError'
+    head:
+      tags: [Endpoint]
+      operationId: headEndpoint
+      summary: Check endpoint existence
+      parameters:
+        - $ref: '#/components/parameters/id'
+      responses:
+        '200':
+          description: Endpoint exists.
+        '401':
+          description: Unauthorized.
+        '403':
+          description: Forbidden.
+        '404':
+          description: Endpoint not found.
     put:
       tags: [Endpoint]
+      operationId: updateEndpoint
       summary: Update endpoint
       parameters:
         - $ref: '#/components/parameters/id'
@@ -320,17 +382,37 @@ paths:
           $ref: '#/components/responses/OperationOutcomeError'
 
   /HealthcareService:
+    servers:
+      - url: https://pcm.fhir.health.gov.il/r4
     get:
       tags: [HealthcareService]
+      operationId: searchHealthcareServices
       summary: Search services
+      description: |
+        Search canonical catalog services and organization-specific instance subscriptions.
+        Identifier searches can target either PCM HealthcareService identifier system:
+        `http://pcm.fhir.health.gov.il/identifier/pcm-healthcareservice-catalog-id`
+        for canonical catalog entries, or
+        `http://pcm.fhir.health.gov.il/identifier/pcm-healthcareservice-instance-id`
+        for organization-specific instance subscriptions.
+
+        Default visibility is active-biased. When the `active` query parameter is omitted,
+        PCM returns active catalog entries and active instance services. The authenticated
+        caller also sees its own instance services even when `active=false`, so an
+        organization can inspect subscriptions that it disabled and can request
+        reactivation when server-side rules permit it.
+
+        Explicit `active=false` searches are authorization-limited. Ordinary organizations
+        can see only their own inactive instance services. PCM administration can inspect
+        inactive catalog and instance records for operational management.
       parameters:
         - $ref: '#/components/parameters/_id'
         - $ref: '#/components/parameters/identifier'
         - $ref: '#/components/parameters/active'
-        - $ref: '#/components/parameters/category'
-        - $ref: '#/components/parameters/type'
+        - $ref: '#/components/parameters/service_category'
+        - $ref: '#/components/parameters/service_type'
         - $ref: '#/components/parameters/name'
-        - $ref: '#/components/parameters/providedBy'
+        - $ref: '#/components/parameters/organization'
       responses:
         '200':
           description: Bundle of services
@@ -352,10 +434,41 @@ paths:
     post:
       tags: [HealthcareService]
       operationId: createHealthcareService
-      summary: Create service (canonical or instance)
+      summary: Register service or request a new service
       description: |
-        Service providers post an instance to register a service association.
-        PCM admins may post canonical services as part of catalog management.
+        Service providers discover active catalog services first with
+        `GET /HealthcareService?active=true`. If a suitable active canonical catalog
+        service exists, the provider posts a minimal instance HealthcareService with
+        the `basedOn` extension to register for that service. If no suitable service
+        exists, the provider posts a full new-service registration request through
+        the same instance flow, including service name, purpose, information buckets,
+        history depth, access mode, access duration, clinical information, and example
+        queries.
+
+        Submit profiles are illustrative implementation guidance only and are not
+        sent in `meta.profile`. Runtime service submit requests are distinguished by
+        `meta.tag=instance` and payload shape: `basedOn` present means existing
+        catalog registration; no `basedOn` with a full service definition means a
+        new-service registration request. Created/read response examples use the
+        returned `pcm-healthcareservice-instance` profile.
+
+        External clients do not directly create an immediately active canonical
+        catalog service. For a valid new-service registration request, PCM creates
+        both the canonical catalog service and the provider's organization
+        registration with `active=false`. Activation and any required review or
+        exception handling are managed outside this FHIR operation. Clients observe
+        the result through `HealthcareService.active` and OperationOutcome responses,
+        not through separate public review resources.
+
+        Full service definitions require a human-readable service purpose. The public
+        FHIR representation for that purpose is `HealthcareService.extraDetails`, carrying
+        the service description/purpose ("תיאור השירות (מטרה)"). Client-supplied `active`
+        values are controlled by PCM and may be ignored or overridden. PCM assigns
+        the stable instance/subscription business identifier using system
+        `http://pcm.fhir.health.gov.il/identifier/pcm-healthcareservice-instance-id`; clients
+        should omit `identifier` on instance create/update. Clients should include
+        `meta.tag=instance` on service POST/PUT requests so request intent is explicit,
+        but should not include `meta.profile` on submit request payloads.
       requestBody:
         required: true
         content:
@@ -363,10 +476,10 @@ paths:
             schema:
               $ref: '#/components/schemas/HealthcareService'
             examples:
-              instanceSubmit:
+              existingCatalogInstanceSubmit:
                 $ref: '#/components/examples/HealthcareServiceInstanceSubmit'
-              catalogSubmit:
-                $ref: '#/components/examples/HealthcareServiceCatalogSubmit'
+              newServiceRegistrationSubmit:
+                $ref: '#/components/examples/HealthcareServiceNewServiceRegistrationSubmit'
       responses:
         '201':
           description: Created service
@@ -375,10 +488,10 @@ paths:
               schema:
                 $ref: '#/components/schemas/HealthcareService'
               examples:
-                catalogCreated:
-                  $ref: '#/components/examples/HealthcareServiceCatalogRetrieval'
                 instanceCreated:
                   $ref: '#/components/examples/HealthcareServiceInstanceRetrieval'
+                pendingNewServiceCreated:
+                  $ref: '#/components/examples/HealthcareServiceInstancePendingRetrieval'
           links:
             ReadHealthcareServiceById:
               operationId: readHealthcareService
@@ -395,6 +508,8 @@ paths:
           $ref: '#/components/responses/OperationOutcomeError'
 
   /HealthcareService/{id}:
+    servers:
+      - url: https://pcm.fhir.health.gov.il/r4
     get:
       tags: [HealthcareService]
       operationId: readHealthcareService
@@ -411,6 +526,8 @@ paths:
               examples:
                 catalogRetrieval:
                   $ref: '#/components/examples/HealthcareServiceCatalogRetrieval'
+                pendingCatalogRetrieval:
+                  $ref: '#/components/examples/HealthcareServiceCatalogPendingRetrieval'
                 instanceRetrieval:
                   $ref: '#/components/examples/HealthcareServiceInstanceRetrieval'
         '400':
@@ -423,12 +540,41 @@ paths:
           $ref: '#/components/responses/OperationOutcomeNotFound'
         default:
           $ref: '#/components/responses/OperationOutcomeError'
+    head:
+      tags: [HealthcareService]
+      operationId: headHealthcareService
+      summary: Check service existence
+      parameters:
+        - $ref: '#/components/parameters/id'
+      responses:
+        '200':
+          description: HealthcareService exists.
+        '401':
+          description: Unauthorized.
+        '403':
+          description: Forbidden.
+        '404':
+          description: HealthcareService not found.
     put:
       tags: [HealthcareService]
-      summary: Update service (deactivate instance)
+      operationId: updateHealthcareService
+      summary: Update service instance state or submit catalog update request
       description: |
-        Instance owners may deactivate by PUT with active=false. PCM ignores
-        non-writable elements and enforces policy.
+        Instance owners may submit a minimal PUT containing `active=false` to disable their
+        own instance subscription. They may submit `active=true` to request reactivation,
+        but PCM allows that transition only when server-side rules permit external use;
+        otherwise it returns an OperationOutcome and leaves the resource inactive.
+        Non-writable elements are ignored or overwritten by PCM. Clients
+        should include `meta.tag=instance` on service PUT requests, but should not
+        include `meta.profile` on submit/update request payloads.
+
+        Catalog update requests may also be submitted through this operation. PCM does
+        not mutate the active canonical catalog entry inline. Changes to information
+        buckets, patient-consent access parameters, tagged clinical data, or history
+        depth are rejected with an OperationOutcome and should be submitted through
+        the new-service registration flow. Changes accepted for asynchronous processing
+        return a `202 Accepted` OperationOutcome, and the active catalog entry remains
+        unchanged until PCM applies the update.
       parameters:
         - $ref: '#/components/parameters/id'
       requestBody:
@@ -439,7 +585,7 @@ paths:
               $ref: '#/components/schemas/HealthcareService'
             examples:
               instanceDeactivate:
-                $ref: '#/components/examples/HealthcareServiceInstanceSubmit'
+                $ref: '#/components/examples/HealthcareServiceInstanceDeactivate'
       responses:
         '200':
           description: Updated service
@@ -450,18 +596,31 @@ paths:
               examples:
                 instanceUpdated:
                   $ref: '#/components/examples/HealthcareServiceInstanceRetrieval'
+        '202':
+          description: Catalog update request accepted for asynchronous processing
+          content:
+            application/fhir+json:
+              schema:
+                $ref: '#/components/schemas/OperationOutcome'
+              examples:
+                catalogUpdateAccepted:
+                  $ref: '#/components/examples/OperationOutcomeCatalogUpdateAccepted'
         '400':
           $ref: '#/components/responses/OperationOutcomeBadRequest'
         '401':
           $ref: '#/components/responses/OperationOutcomeUnauthorized'
         '403':
           $ref: '#/components/responses/OperationOutcomeForbidden'
+        '422':
+          $ref: '#/components/responses/OperationOutcomeUnprocessable'
         '404':
           $ref: '#/components/responses/OperationOutcomeNotFound'
         default:
           $ref: '#/components/responses/OperationOutcomeError'
 
   /Consent:
+    servers:
+      - url: https://pcm.fhir.health.gov.il/r4
     get:
       tags: [Consent]
       operationId: searchConsents
@@ -474,6 +633,7 @@ paths:
         - $ref: '#/components/parameters/identifier'
         - $ref: '#/components/parameters/status'
         - $ref: '#/components/parameters/patient'
+        - $ref: '#/components/parameters/patient_identifier'
         - $ref: '#/components/parameters/pcm_service'
         - $ref: '#/components/parameters/_include'
         - $ref: '#/components/parameters/_include_iterate'
@@ -499,6 +659,18 @@ paths:
       tags: [Consent]
       operationId: createConsent
       summary: Create consent request
+      description: |
+        Create a proposed consent request for a patient and a service provider's
+        HealthcareService instance. The `pcm-service` extension must reference an
+        existing active instance service. PCM rejects requests that omit the service,
+        point to a canonical catalog service, or point to an inactive or otherwise
+        unusable instance. Token issuance later repeats this service-state check, so an
+        existing active Consent does not authorize data-source access after the
+        service instance becomes inactive. The accepted request shape is documented
+        by the illustrative `pcm-consent-submit` profile, but clients do not send that
+        profile in `meta.profile`. `scope=patient-privacy` and `category=INFA` are
+        mandatory fixed values on submit. Created/read response examples use the
+        returned `pcm-consent` profile.
       requestBody:
         required: true
         content:
@@ -534,6 +706,8 @@ paths:
           $ref: '#/components/responses/OperationOutcomeError'
 
   /Consent/{id}:
+    servers:
+      - url: https://pcm.fhir.health.gov.il/r4
     get:
       tags: [Consent]
       operationId: readConsent
@@ -560,8 +734,24 @@ paths:
           $ref: '#/components/responses/OperationOutcomeNotFound'
         default:
           $ref: '#/components/responses/OperationOutcomeError'
+    head:
+      tags: [Consent]
+      operationId: headConsent
+      summary: Check consent existence
+      parameters:
+        - $ref: '#/components/parameters/id'
+      responses:
+        '200':
+          description: Consent exists.
+        '401':
+          description: Unauthorized.
+        '403':
+          description: Forbidden.
+        '404':
+          description: Consent not found.
     put:
       tags: [Consent]
+      operationId: updateConsent
       summary: Update consent status
       description: |
         Used by PCM (portal) to approve/reject/revoke, and by service provider
@@ -599,101 +789,15 @@ paths:
         default:
           $ref: '#/components/responses/OperationOutcomeError'
 
-  /VerificationResult:
-    get:
-      tags: [VerificationResult]
-      summary: Search approvals
-      parameters:
-        - $ref: '#/components/parameters/_id'
-      responses:
-        '200':
-          description: Bundle of approvals
-          content:
-            application/fhir+json:
-              schema:
-                $ref: '#/components/schemas/Bundle'
-              examples:
-                verificationResultSearch:
-                  $ref: '#/components/examples/VerificationResultSearchBundle'
-        '400':
-          $ref: '#/components/responses/OperationOutcomeBadRequest'
-        '401':
-          $ref: '#/components/responses/OperationOutcomeUnauthorized'
-        '403':
-          $ref: '#/components/responses/OperationOutcomeForbidden'
-        default:
-          $ref: '#/components/responses/OperationOutcomeError'
-    post:
-      tags: [VerificationResult]
-      operationId: createVerificationResult
-      summary: Create approval
-      requestBody:
-        required: true
-        content:
-          application/fhir+json:
-            schema:
-              $ref: '#/components/schemas/VerificationResult'
-            examples:
-              approvalSubmit:
-                $ref: '#/components/examples/VerificationResultSubmit'
-      responses:
-        '201':
-          description: Created approval
-          content:
-            application/fhir+json:
-              schema:
-                $ref: '#/components/schemas/VerificationResult'
-              examples:
-                approvalCreated:
-                  $ref: '#/components/examples/VerificationResultRetrieval'
-          links:
-            ReadVerificationResultById:
-              operationId: readVerificationResult
-              parameters:
-                id: '$response.body#/id'
-              description: Follow-up read of the created VerificationResult.
-        '400':
-          $ref: '#/components/responses/OperationOutcomeBadRequest'
-        '401':
-          $ref: '#/components/responses/OperationOutcomeUnauthorized'
-        '403':
-          $ref: '#/components/responses/OperationOutcomeForbidden'
-        default:
-          $ref: '#/components/responses/OperationOutcomeError'
-
-  /VerificationResult/{id}:
-    get:
-      tags: [VerificationResult]
-      operationId: readVerificationResult
-      summary: Read approval
-      parameters:
-        - $ref: '#/components/parameters/id'
-      responses:
-        '200':
-          description: VerificationResult resource
-          content:
-            application/fhir+json:
-              schema:
-                $ref: '#/components/schemas/VerificationResult'
-              examples:
-                approvalRetrieval:
-                  $ref: '#/components/examples/VerificationResultRetrieval'
-        '400':
-          $ref: '#/components/responses/OperationOutcomeBadRequest'
-        '401':
-          $ref: '#/components/responses/OperationOutcomeUnauthorized'
-        '403':
-          $ref: '#/components/responses/OperationOutcomeForbidden'
-        '404':
-          $ref: '#/components/responses/OperationOutcomeNotFound'
-        default:
-          $ref: '#/components/responses/OperationOutcomeError'
-
 components:
   securitySchemes:
-    mutualTLS:
+    mtlsTransport:
       type: mutualTLS
-      description: mTLS client authentication.
+      description: >
+        mTLS is required as a transport-level policy. The presented client
+        certificate is not the OAuth2 client authentication method; OAuth2
+        clients authenticate with private_key_jwt at the token and introspection
+        endpoints.
     bearerAuth:
       type: http
       scheme: bearer
@@ -734,13 +838,13 @@ components:
       schema:
         type: string
       description: Search by activation status (token; true|false).
-    category:
-      name: category
+    service_category:
+      name: service-category
       in: query
       required: false
       schema:
         type: string
-      description: Search by HealthcareService.category.
+      description: FHIR R4 search by HealthcareService.category.
     status:
       name: status
       in: query
@@ -753,7 +857,14 @@ components:
       required: false
       schema:
         type: string
-      description: Search by type code (Organization.type or HealthcareService.type).
+      description: Search by Organization.type code.
+    service_type:
+      name: service-type
+      in: query
+      required: false
+      schema:
+        type: string
+      description: FHIR R4 search by HealthcareService.type.
     name:
       name: name
       in: query
@@ -761,13 +872,13 @@ components:
       schema:
         type: string
       description: Search by HealthcareService.name.
-    providedBy:
-      name: providedBy
+    organization:
+      name: organization
       in: query
       required: false
       schema:
         type: string
-      description: Search by HealthcareService.providedBy (instance profile only).
+      description: FHIR R4 search by HealthcareService.providedBy (instance profile only).
     partof:
       name: partof
       in: query
@@ -780,7 +891,14 @@ components:
       required: false
       schema:
         type: string
-      description: Search by patient logical reference; supports patient.identifier chain (system|value).
+      description: Search by patient logical reference. Identifier search uses patient:identifier=system|value.
+    patient_identifier:
+      name: patient:identifier
+      in: query
+      required: false
+      schema:
+        type: string
+      description: Search Consent.patient by logical identifier, formatted as system|value.
     pcm_service:
       name: pcm-service
       in: query
@@ -831,6 +949,15 @@ components:
           examples:
             forbidden:
               $ref: '#/components/examples/OperationOutcomeForbidden'
+    OperationOutcomeUnprocessable:
+      description: Unprocessable request (OperationOutcome)
+      content:
+        application/fhir+json:
+          schema:
+            $ref: '#/components/schemas/OperationOutcome'
+          examples:
+            materialChange:
+              $ref: '#/components/examples/OperationOutcomeMaterialCanonicalChange'
     OperationOutcomeNotFound:
       description: Not found (OperationOutcome)
       content:
@@ -854,6 +981,7 @@ components:
     BaseResource:
       type: object
       required: [resourceType]
+      additionalProperties: true
       properties:
         resourceType:
           type: string
@@ -866,6 +994,7 @@ components:
       allOf:
         - $ref: '#/components/schemas/BaseResource'
         - type: object
+          additionalProperties: true
           properties:
             text:
               $ref: '#/components/schemas/Narrative'
@@ -875,15 +1004,12 @@ components:
                 $ref: '#/components/schemas/Extension'
 
     Resource:
-      oneOf:
-        - $ref: '#/components/schemas/Organization'
-        - $ref: '#/components/schemas/Endpoint'
-        - $ref: '#/components/schemas/HealthcareService'
-        - $ref: '#/components/schemas/Consent'
-        - $ref: '#/components/schemas/VerificationResult'
-        - $ref: '#/components/schemas/CapabilityStatement'
-        - $ref: '#/components/schemas/Bundle'
-        - $ref: '#/components/schemas/OperationOutcome'
+      type: object
+      required: [resourceType]
+      additionalProperties: true
+      properties:
+        resourceType:
+          type: string
 
     CapabilityStatement:
       allOf:
@@ -1009,10 +1135,23 @@ components:
 
     SmartConfiguration:
       type: object
+      required:
+        - issuer
+        - token_endpoint
+        - introspection_endpoint
+        - jwks_uri
+        - grant_types_supported
+        - response_types_supported
+        - response_modes_supported
+        - token_endpoint_auth_methods_supported
+        - token_endpoint_auth_signing_alg_values_supported
+        - introspection_endpoint_auth_methods_supported
+        - introspection_endpoint_auth_signing_alg_values_supported
+        - code_challenge_methods_supported
+        - scopes_supported
+        - capabilities
       properties:
         issuer:
-          type: string
-        authorization_endpoint:
           type: string
         token_endpoint:
           type: string
@@ -1034,6 +1173,20 @@ components:
           type: array
           items:
             type: string
+        token_endpoint_auth_signing_alg_values_supported:
+          type: array
+          items:
+            type: string
+        introspection_endpoint_auth_methods_supported:
+          type: array
+          items:
+            type: string
+        introspection_endpoint_auth_signing_alg_values_supported:
+          type: array
+          items:
+            type: string
+        jwks_uri:
+          type: string
         code_challenge_methods_supported:
           type: array
           items:
@@ -1199,11 +1352,22 @@ components:
               items:
                 $ref: '#/components/schemas/CodeableConcept'
             type:
-              $ref: '#/components/schemas/CodeableConcept'
+              type: array
+              items:
+                $ref: '#/components/schemas/CodeableConcept'
             extraDetails:
               type: string
+              description: >
+                Human-readable service purpose / clinical-business justification
+                ("תיאור השירות (מטרה)") for canonical definitions and full
+                service-registration requests.
             identifier:
               type: array
+              description: >
+                PCM HealthcareService business identifiers. Canonical catalog services use
+                http://pcm.fhir.health.gov.il/identifier/pcm-healthcareservice-catalog-id;
+                organization-specific instance subscriptions use
+                http://pcm.fhir.health.gov.il/identifier/pcm-healthcareservice-instance-id.
               items:
                 $ref: '#/components/schemas/Identifier'
 
@@ -1268,36 +1432,25 @@ components:
         reference:
           $ref: '#/components/schemas/Reference'
 
-    VerificationResult:
-      allOf:
-        - $ref: '#/components/schemas/DomainResource'
-        - type: object
-          required: [resourceType]
-          properties:
-            resourceType:
-              type: string
-              enum: [VerificationResult]
-            status:
-              type: string
-              enum:
-                - validated
-            target:
-              type: array
-              items:
-                $ref: '#/components/schemas/Reference'
-            validator:
-              type: object
-              properties:
-                organization:
-                  $ref: '#/components/schemas/Reference'
-
     Meta:
       type: object
+      additionalProperties: true
       properties:
+        versionId:
+          type: string
+        lastUpdated:
+          type: string
+          format: date-time
+        source:
+          type: string
         profile:
           type: array
           items:
             type: string
+        security:
+          type: array
+          items:
+            $ref: '#/components/schemas/Coding'
         tag:
           type: array
           items:
@@ -1458,22 +1611,26 @@ components:
     SmartConfigurationPCM:
       summary: PCM SMART configuration
       value:
-        issuer: "https://pcm.auth.example.org"
-        authorization_endpoint: "https://pcm.auth.example.org/authorize"
-        token_endpoint: "https://pcm.auth.example.org/token"
-        introspection_endpoint: "https://pcm.auth.example.org/introspect"
+        issuer: "https://pcm.fhir.health.gov.il"
+        token_endpoint: "https://pcm.fhir.health.gov.il/token"
+        introspection_endpoint: "https://pcm.fhir.health.gov.il/introspect"
         grant_types_supported:
           - client_credentials
-          - authorization_code
-          - refresh_token
         response_types_supported:
-          - code
+          - none
         response_modes_supported:
-          - query
+          - none
         token_endpoint_auth_methods_supported:
-          - tls_client_auth
+          - private_key_jwt
+        token_endpoint_auth_signing_alg_values_supported:
+          - ES384
+        introspection_endpoint_auth_methods_supported:
+          - private_key_jwt
+        introspection_endpoint_auth_signing_alg_values_supported:
+          - ES384
+        jwks_uri: "https://pcm.fhir.health.gov.il/.well-known/jwks.json"
         code_challenge_methods_supported:
-          - S256
+          - none
         scopes_supported:
           - system/Organization.read
           - system/Organization.write
@@ -1483,8 +1640,6 @@ components:
           - system/HealthcareService.write
           - system/Consent.read
           - system/Consent.write
-          - system/VerificationResult.read
-          - system/VerificationResult.write
         capabilities:
           - client-confidential-asymmetric
           - permission-v2
@@ -1504,8 +1659,7 @@ components:
           url: "https://pcm.fhir.health.gov.il/r4"
         text:
           status: generated
-          div: |
-            <div xmlns="http://www.w3.org/1999/xhtml">CapabilityStatement for the PCM FHIR server. It supports Organization onboarding updates, Endpoint registration, HealthcareService catalog/instance management, VerificationResult approvals, and Consent lifecycle operations as documented in pcm_process_flow.md.</div>
+          div: '<div xmlns="http://www.w3.org/1999/xhtml">CapabilityStatement for the PCM FHIR server. It supports Organization onboarding updates, Endpoint registration, HealthcareService catalog/instance management, and Consent lifecycle operations as documented in pcm_process_flow.md. HEAD is supported on resource read URLs for existence checks.</div>'
         rest:
           - security:
               description: "Client authentication uses mTLS and client_credentials tokens; PCM enforces authorization."
@@ -1514,6 +1668,7 @@ components:
                   - "http://pcm.fhir.health.gov.il/StructureDefinition/pcm-organization-parent"
                   - "http://pcm.fhir.health.gov.il/StructureDefinition/pcm-organization-service-provider"
                   - "http://pcm.fhir.health.gov.il/StructureDefinition/pcm-organization-source"
+                  - "http://pcm.fhir.health.gov.il/StructureDefinition/pcm-organization-system"
                 interaction:
                   - code: read
                   - code: search-type
@@ -1553,8 +1708,10 @@ components:
                     definition: "http://pcm.fhir.health.gov.il/SearchParameter/pcm-endpoint-thumbprint"
                     documentation: "Search by applicable certificate thumbprint (x5t#S256)."
                 type: Endpoint
-                profile: "http://pcm.fhir.health.gov.il/StructureDefinition/pcm-endpoint"
-                documentation: "FHIR server endpoint for a Data Source organization."
+                supportedProfile:
+                  - "http://pcm.fhir.health.gov.il/StructureDefinition/pcm-endpoint"
+                  - "http://pcm.fhir.health.gov.il/StructureDefinition/pcm-endpoint-system"
+                documentation: "FHIR server endpoint for a Data Source organization or the PCM system."
               - supportedProfile:
                   - "http://pcm.fhir.health.gov.il/StructureDefinition/pcm-healthcareservice-canonical"
                   - "http://pcm.fhir.health.gov.il/StructureDefinition/pcm-healthcareservice-instance"
@@ -1572,21 +1729,21 @@ components:
                     documentation: "Search by activation status."
                   - name: identifier
                     type: token
-                    documentation: "Search by HealthcareService business identifier."
-                  - name: category
+                    documentation: "Search by HealthcareService business identifier (catalog or instance identifier system)."
+                  - name: service-category
                     type: token
-                    documentation: "Search by HealthcareService.category."
-                  - name: type
+                    documentation: "Search by HealthcareService.category using the FHIR R4 service-category search parameter."
+                  - name: service-type
                     type: token
-                    documentation: "Search by HealthcareService.type."
+                    documentation: "Search by HealthcareService.type using the FHIR R4 service-type search parameter."
                   - name: name
                     type: string
                     documentation: "Search by HealthcareService.name."
-                  - name: providedBy
+                  - name: organization
                     type: reference
-                    documentation: "Search by HealthcareService.providedBy (instance profile only)."
+                    documentation: "Search by HealthcareService.providedBy using the FHIR R4 organization search parameter (instance profile only)."
                 type: HealthcareService
-                documentation: "Catalog definitions and instance registrations tied to organizations."
+                documentation: "Catalog definitions and instance registrations tied to organizations. Hosted/returned resources conform to the catalog and instance profiles. Create uses the documented submit payload shapes; submit profiles are illustrative only and are not sent in meta.profile. Public usability is exposed through HealthcareService.active only."
               - interaction:
                   - code: read
                   - code: search-type
@@ -1604,29 +1761,20 @@ components:
                     documentation: "Search by Consent.status."
                   - name: patient
                     type: reference
-                    documentation: "Search by patient logical reference (supports patient.identifier chain)."
+                    documentation: "Search by patient logical reference. Identifier search uses the FHIR reference identifier modifier: patient:identifier=system|value."
                   - name: pcm-service
                     type: reference
                     definition: "http://pcm.fhir.health.gov.il/SearchParameter/pcm-consent-service"
                     documentation: "Search by the pcmService extension reference (HealthcareService instance)."
                 searchInclude:
                   - Consent:actor
+                  - Organization:endpoint
+                  - Organization:partof
                 type: Consent
                 profile: "http://pcm.fhir.health.gov.il/StructureDefinition/pcm-consent"
-                documentation: "Consent requests and approved consents for PCM services. Supports _include=Consent:actor and _include:iterate=Organization:endpoint|Organization:partof on consent searches."
-              - interaction:
-                  - code: read
-                  - code: search-type
-                  - code: create
-                searchParam:
-                  - name: _id
-                    type: token
-                    documentation: "Search by logical id."
-                type: VerificationResult
-                profile: "http://pcm.fhir.health.gov.il/StructureDefinition/pcm-verificationresult-service-approval"
-                documentation: "Approvals by data source parent organizations targeting service instances."
+                documentation: "Consent requests and lifecycle updates for PCM services. Hosted/returned resources conform to PCMConsent. Create uses the documented submit payload shape; the submit profile is illustrative only and is not sent in meta.profile. Supports _include=Consent:actor and _include:iterate=Organization:endpoint|Organization:partof on consent searches."
             mode: server
-            documentation: "PCM server supports only the interactions described in the process flow."
+            documentation: "PCM server supports only the interactions described in the process flow. HEAD is supported on resource read URLs for existence checks. Transaction Bundle interactions are not declared by this CapabilityStatement."
         name: PcmCapabilityStatement
         title: "PCM FHIR Capability Statement"
         status: active
@@ -1652,7 +1800,7 @@ components:
                 display: "Parent Organization"
           - coding:
               - system: "http://fhir.health.gov.il/cs/institution-type-moh"
-                code: 73
+                code: "73"
                 display: "Health Maintenance Organization"
         telecom:
           - system: phone
@@ -1708,7 +1856,7 @@ components:
                 display: "Parent Organization"
           - coding:
               - system: "http://fhir.health.gov.il/cs/institution-type-moh"
-                code: 1
+                code: "1"
                 display: "General Hospital"
         telecom:
           - system: phone
@@ -1761,7 +1909,7 @@ components:
                 display: "Service Provider"
           - coding:
               - system: "http://fhir.health.gov.il/cs/institution-type-moh"
-                code: 1
+                code: "1"
                 display: "General Hospital"
         partOf:
           reference: "Organization/org-parent-hospital-a"
@@ -1793,7 +1941,7 @@ components:
                 display: "Service Provider"
           - coding:
               - system: "http://fhir.health.gov.il/cs/institution-type-moh"
-                code: 1
+                code: "1"
                 display: "General Hospital"
         partOf:
           reference: "Organization/org-parent-hospital-a"
@@ -1822,7 +1970,7 @@ components:
                 display: "Data Source"
           - coding:
               - system: "http://fhir.health.gov.il/cs/institution-type-moh"
-                code: 73
+                code: "73"
                 display: "Health Maintenance Organization"
         partOf:
           reference: "Organization/org-parent-hmo-b-submit"
@@ -1854,7 +2002,7 @@ components:
                 display: "Data Source"
           - coding:
               - system: "http://fhir.health.gov.il/cs/institution-type-moh"
-                code: 73
+                code: "73"
                 display: "Health Maintenance Organization"
         partOf:
           reference: "Organization/org-parent-hmo-b-submit"
@@ -1986,10 +2134,11 @@ components:
               - url: "thumbprint"
                 valueString: "dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk"
 
-    HealthcareServiceCatalogSubmit:
-      summary: Canonical service (submit)
+    HealthcareServiceCatalogRetrieval:
+      summary: Canonical service (retrieval)
       value:
         resourceType: HealthcareService
+        id: svc-catalog-cross-org-summary
         meta:
           profile:
             - "http://pcm.fhir.health.gov.il/StructureDefinition/pcm-healthcareservice-canonical"
@@ -2001,7 +2150,7 @@ components:
           - use: official
             system: "http://pcm.fhir.health.gov.il/identifier/pcm-healthcareservice-catalog-id"
             value: "PCM-CAT-0101"
-        active: false
+        active: true
         name: "Cross-Organization Patient Summary"
         category:
           - coding:
@@ -2010,11 +2159,11 @@ components:
                 display: "Hospital"
             text: "Hospital / continuity of care"
         type:
-          coding:
-            - system: "http://terminology.hl7.org/CodeSystem/v3-ActCode"
-              code: INFA
-              display: "information access"
-        extraDetails: "A standardized summary used for cross-organization care coordination and treatment continuity."
+          - coding:
+              - system: "http://terminology.hl7.org/CodeSystem/v3-ActCode"
+                code: INFA
+                display: "information access"
+        extraDetails: "Lets a care team view recent laboratory results and medication information to understand current treatment, avoid duplicate tests, and reduce medication-safety risks."
         extension:
           - url: "http://pcm.fhir.health.gov.il/StructureDefinition/ext-access-mode"
             valueCode: continuous
@@ -2028,7 +2177,7 @@ components:
             valueString: "GET [FHIR BASE]/Observation?category=laboratory&_lastUpdated=ge{{period.start}}"
           - url: "http://pcm.fhir.health.gov.il/StructureDefinition/ext-example-query"
             valueString: "GET [FHIR BASE]/MedicationRequest?_lastUpdated=ge{{period.start}}"
-          - url: "http://pcm.fhir.health.gov.il/StructureDefinition/ext-allow-patient-basket-change"
+          - url: "http://pcm.fhir.health.gov.il/StructureDefinition/ext-allow-patient-bucket-change"
             valueBoolean: true
           - url: "http://pcm.fhir.health.gov.il/StructureDefinition/ext-information-bucket"
             extension:
@@ -2059,11 +2208,11 @@ components:
                   code: a
                   unit: years
 
-    HealthcareServiceCatalogRetrieval:
-      summary: Canonical service (retrieval)
+    HealthcareServiceCatalogPendingRetrieval:
+      summary: New service catalog (pending retrieval)
       value:
         resourceType: HealthcareService
-        id: svc-catalog-cross-org-summary
+        id: svc-catalog-new-service-pending
         meta:
           profile:
             - "http://pcm.fhir.health.gov.il/StructureDefinition/pcm-healthcareservice-canonical"
@@ -2074,8 +2223,8 @@ components:
         identifier:
           - use: official
             system: "http://pcm.fhir.health.gov.il/identifier/pcm-healthcareservice-catalog-id"
-            value: "PCM-CAT-0101"
-        active: true
+            value: "PCM-CAT-0201"
+        active: false
         name: "Cross-Organization Patient Summary"
         category:
           - coding:
@@ -2084,11 +2233,11 @@ components:
                 display: "Hospital"
             text: "Hospital / continuity of care"
         type:
-          coding:
-            - system: "http://terminology.hl7.org/CodeSystem/v3-ActCode"
-              code: INFA
-              display: "information access"
-        extraDetails: "A standardized summary used for cross-organization care coordination and treatment continuity."
+          - coding:
+              - system: "http://terminology.hl7.org/CodeSystem/v3-ActCode"
+                code: INFA
+                display: "information access"
+        extraDetails: "Lets a care team view recent laboratory results and medication information to understand current treatment, avoid duplicate tests, and reduce medication-safety risks."
         extension:
           - url: "http://pcm.fhir.health.gov.il/StructureDefinition/ext-access-mode"
             valueCode: continuous
@@ -2102,7 +2251,73 @@ components:
             valueString: "GET [FHIR BASE]/Observation?category=laboratory&_lastUpdated=ge{{period.start}}"
           - url: "http://pcm.fhir.health.gov.il/StructureDefinition/ext-example-query"
             valueString: "GET [FHIR BASE]/MedicationRequest?_lastUpdated=ge{{period.start}}"
-          - url: "http://pcm.fhir.health.gov.il/StructureDefinition/ext-allow-patient-basket-change"
+          - url: "http://pcm.fhir.health.gov.il/StructureDefinition/ext-allow-patient-bucket-change"
+            valueBoolean: true
+          - url: "http://pcm.fhir.health.gov.il/StructureDefinition/ext-information-bucket"
+            extension:
+              - url: "bucket"
+                valueCodeableConcept:
+                  coding:
+                    - system: "http://fhir.health.gov.il/cs/il-hdp-information-buckets"
+                      code: laboratoryTests
+                      display: "Laboratory tests"
+              - url: "historyDepth"
+                valueDuration:
+                  value: 2
+                  system: "http://unitsofmeasure.org"
+                  code: a
+                  unit: years
+          - url: "http://pcm.fhir.health.gov.il/StructureDefinition/ext-information-bucket"
+            extension:
+              - url: "bucket"
+                valueCodeableConcept:
+                  coding:
+                    - system: "http://fhir.health.gov.il/cs/il-hdp-information-buckets"
+                      code: medications
+                      display: "Medications"
+              - url: "historyDepth"
+                valueDuration:
+                  value: 1
+                  system: "http://unitsofmeasure.org"
+                  code: a
+                  unit: years
+
+    HealthcareServiceNewServiceRegistrationSubmit:
+      summary: New service registration (full submit)
+      value:
+        resourceType: HealthcareService
+        meta:
+          tag:
+            - system: "http://pcm.fhir.health.gov.il/cs/pcm-meta-tag"
+              code: instance
+              display: "Instance"
+        name: "Cross-Organization Patient Summary"
+        category:
+          - coding:
+              - system: "http://terminology.hl7.org/CodeSystem/service-category"
+                code: "35"
+                display: "Hospital"
+            text: "Hospital / continuity of care"
+        type:
+          - coding:
+              - system: "http://terminology.hl7.org/CodeSystem/v3-ActCode"
+                code: INFA
+                display: "information access"
+        extraDetails: "Lets a care team view recent laboratory results and medication information to understand current treatment, avoid duplicate tests, and reduce medication-safety risks."
+        extension:
+          - url: "http://pcm.fhir.health.gov.il/StructureDefinition/ext-access-mode"
+            valueCode: continuous
+          - url: "http://pcm.fhir.health.gov.il/StructureDefinition/ext-access-duration"
+            valueDuration:
+              value: 6
+              system: "http://unitsofmeasure.org"
+              code: mo
+              unit: months
+          - url: "http://pcm.fhir.health.gov.il/StructureDefinition/ext-example-query"
+            valueString: "GET [FHIR BASE]/Observation?category=laboratory&_lastUpdated=ge{{period.start}}"
+          - url: "http://pcm.fhir.health.gov.il/StructureDefinition/ext-example-query"
+            valueString: "GET [FHIR BASE]/MedicationRequest?_lastUpdated=ge{{period.start}}"
+          - url: "http://pcm.fhir.health.gov.il/StructureDefinition/ext-allow-patient-bucket-change"
             valueBoolean: true
           - url: "http://pcm.fhir.health.gov.il/StructureDefinition/ext-information-bucket"
             extension:
@@ -2134,74 +2349,29 @@ components:
                   unit: years
 
     HealthcareServiceInstanceSubmit:
-      summary: Service instance (submit)
+      summary: Service instance (minimal submit)
       value:
         resourceType: HealthcareService
         meta:
-          profile:
-            - "http://pcm.fhir.health.gov.il/StructureDefinition/pcm-healthcareservice-instance"
+          tag:
+            - system: "http://pcm.fhir.health.gov.il/cs/pcm-meta-tag"
+              code: instance
+              display: "Instance"
+        extension:
+          - url: "http://pcm.fhir.health.gov.il/StructureDefinition/ext-based-on-canonical-healthcareservice"
+            valueReference:
+              reference: "HealthcareService/svc-catalog-cross-org-summary"
+
+    HealthcareServiceInstanceDeactivate:
+      summary: Service instance deactivate (minimal PUT)
+      value:
+        resourceType: HealthcareService
+        meta:
           tag:
             - system: "http://pcm.fhir.health.gov.il/cs/pcm-meta-tag"
               code: instance
               display: "Instance"
         active: false
-        name: "Hospital A - Patient App / Cross-Org Summary"
-        category:
-          - coding:
-              - system: "http://terminology.hl7.org/CodeSystem/service-category"
-                code: "35"
-                display: "Hospital"
-            text: "Cross-organization continuity of care"
-        type:
-          coding:
-            - system: "http://terminology.hl7.org/CodeSystem/v3-ActCode"
-              code: INFA
-              display: "information access"
-        extraDetails: "Hospital A patient app requests a cross-organization summary for treatment continuity."
-        extension:
-          - url: "http://pcm.fhir.health.gov.il/StructureDefinition/ext-based-on-canonical-healthcareservice"
-            valueReference:
-              reference: "HealthcareService/svc-catalog-cross-org-summary"
-          - url: "http://pcm.fhir.health.gov.il/StructureDefinition/ext-access-mode"
-            valueCode: continuous
-          - url: "http://pcm.fhir.health.gov.il/StructureDefinition/ext-access-duration"
-            valueDuration:
-              value: 6
-              system: "http://unitsofmeasure.org"
-              code: mo
-              unit: months
-          - url: "http://pcm.fhir.health.gov.il/StructureDefinition/ext-example-query"
-            valueString: "GET [FHIR BASE]/Observation?category=laboratory&_lastUpdated=ge{{period.start}}"
-          - url: "http://pcm.fhir.health.gov.il/StructureDefinition/ext-allow-patient-basket-change"
-            valueBoolean: true
-          - url: "http://pcm.fhir.health.gov.il/StructureDefinition/ext-information-bucket"
-            extension:
-              - url: "bucket"
-                valueCodeableConcept:
-                  coding:
-                    - system: "http://fhir.health.gov.il/cs/il-hdp-information-buckets"
-                      code: laboratoryTests
-                      display: "Laboratory tests"
-              - url: "historyDepth"
-                valueDuration:
-                  value: 2
-                  system: "http://unitsofmeasure.org"
-                  code: a
-                  unit: years
-          - url: "http://pcm.fhir.health.gov.il/StructureDefinition/ext-information-bucket"
-            extension:
-              - url: "bucket"
-                valueCodeableConcept:
-                  coding:
-                    - system: "http://fhir.health.gov.il/cs/il-hdp-information-buckets"
-                      code: medications
-                      display: "Medications"
-              - url: "historyDepth"
-                valueDuration:
-                  value: 1
-                  system: "http://unitsofmeasure.org"
-                  code: a
-                  unit: years
 
     HealthcareServiceInstanceRetrieval:
       summary: Service instance (retrieval)
@@ -2215,6 +2385,10 @@ components:
             - system: "http://pcm.fhir.health.gov.il/cs/pcm-meta-tag"
               code: instance
               display: "Instance"
+        identifier:
+          - use: official
+            system: "http://pcm.fhir.health.gov.il/identifier/pcm-healthcareservice-instance-id"
+            value: "PCM-HS-INST-0101"
         active: true
         providedBy:
           reference: "Organization/org-sp-hospital-a"
@@ -2226,11 +2400,11 @@ components:
                 display: "Hospital"
             text: "Cross-organization continuity of care"
         type:
-          coding:
-            - system: "http://terminology.hl7.org/CodeSystem/v3-ActCode"
-              code: INFA
-              display: "information access"
-        extraDetails: "Approved instance; patients can now grant consents for Hospital A to access data."
+          - coding:
+              - system: "http://terminology.hl7.org/CodeSystem/v3-ActCode"
+                code: INFA
+                display: "information access"
+        extraDetails: "Lets Hospital A view your recent laboratory results and medication information to understand current treatment, avoid duplicate tests, and reduce medication-safety risks."
         extension:
           - url: "http://pcm.fhir.health.gov.il/StructureDefinition/ext-based-on-canonical-healthcareservice"
             valueReference:
@@ -2238,7 +2412,7 @@ components:
           - url: "http://pcm.fhir.health.gov.il/StructureDefinition/ext-approval-window"
             valuePeriod:
               start: "2026-01-01T00:00:00+02:00"
-              end: "2026-07-01T00:00:00+02:00"
+              end: "2026-01-31T00:00:00+02:00"
           - url: "http://pcm.fhir.health.gov.il/StructureDefinition/ext-access-mode"
             valueCode: continuous
           - url: "http://pcm.fhir.health.gov.il/StructureDefinition/ext-access-duration"
@@ -2249,7 +2423,9 @@ components:
               unit: months
           - url: "http://pcm.fhir.health.gov.il/StructureDefinition/ext-example-query"
             valueString: "GET [FHIR BASE]/Observation?category=laboratory&_lastUpdated=ge{{period.start}}"
-          - url: "http://pcm.fhir.health.gov.il/StructureDefinition/ext-allow-patient-basket-change"
+          - url: "http://pcm.fhir.health.gov.il/StructureDefinition/ext-example-query"
+            valueString: "GET [FHIR BASE]/MedicationRequest?_lastUpdated=ge{{period.start}}"
+          - url: "http://pcm.fhir.health.gov.il/StructureDefinition/ext-allow-patient-bucket-change"
             valueBoolean: true
           - url: "http://pcm.fhir.health.gov.il/StructureDefinition/ext-information-bucket"
             extension:
@@ -2280,28 +2456,88 @@ components:
                   code: a
                   unit: years
 
-    VerificationResultSubmit:
-      summary: Approval (submit)
+    HealthcareServiceInstancePendingRetrieval:
+      summary: New service registration (pending retrieval)
       value:
-        resourceType: VerificationResult
-        status: validated
-        target:
-          - reference: "HealthcareService/svc-instance-hosp-a-cross-org-summary-submit"
-        validator:
-          organization:
-            reference: "Organization/org-parent-hmo-b-submit"
-
-    VerificationResultRetrieval:
-      summary: Approval (retrieval)
-      value:
-        resourceType: VerificationResult
-        id: approval-hmo-b-parent-for-hosp-a-instance
-        status: validated
-        target:
-          - reference: "HealthcareService/svc-instance-hosp-a-cross-org-summary"
-        validator:
-          organization:
-            reference: "Organization/org-parent-hmo-b-submit"
+        resourceType: HealthcareService
+        id: svc-instance-hosp-a-new-service-pending
+        meta:
+          profile:
+            - "http://pcm.fhir.health.gov.il/StructureDefinition/pcm-healthcareservice-instance"
+          tag:
+            - system: "http://pcm.fhir.health.gov.il/cs/pcm-meta-tag"
+              code: instance
+              display: "Instance"
+        identifier:
+          - use: official
+            system: "http://pcm.fhir.health.gov.il/identifier/pcm-healthcareservice-instance-id"
+            value: "PCM-HS-INST-0201"
+        active: false
+        providedBy:
+          reference: "Organization/org-sp-hospital-a"
+        name: "Hospital A - Patient App / Cross-Organization Patient Summary"
+        category:
+          - coding:
+              - system: "http://terminology.hl7.org/CodeSystem/service-category"
+                code: "35"
+                display: "Hospital"
+            text: "Hospital / continuity of care"
+        type:
+          - coding:
+              - system: "http://terminology.hl7.org/CodeSystem/v3-ActCode"
+                code: INFA
+                display: "information access"
+        extraDetails: "Lets Hospital A view your recent laboratory results and medication information to understand current treatment, avoid duplicate tests, and reduce medication-safety risks."
+        extension:
+          - url: "http://pcm.fhir.health.gov.il/StructureDefinition/ext-based-on-canonical-healthcareservice"
+            valueReference:
+              reference: "HealthcareService/svc-catalog-new-service-pending"
+          - url: "http://pcm.fhir.health.gov.il/StructureDefinition/ext-approval-window"
+            valuePeriod:
+              start: "2026-01-01T00:00:00+02:00"
+              end: "2026-01-31T00:00:00+02:00"
+          - url: "http://pcm.fhir.health.gov.il/StructureDefinition/ext-access-mode"
+            valueCode: continuous
+          - url: "http://pcm.fhir.health.gov.il/StructureDefinition/ext-access-duration"
+            valueDuration:
+              value: 6
+              system: "http://unitsofmeasure.org"
+              code: mo
+              unit: months
+          - url: "http://pcm.fhir.health.gov.il/StructureDefinition/ext-example-query"
+            valueString: "GET [FHIR BASE]/Observation?category=laboratory&_lastUpdated=ge{{period.start}}"
+          - url: "http://pcm.fhir.health.gov.il/StructureDefinition/ext-example-query"
+            valueString: "GET [FHIR BASE]/MedicationRequest?_lastUpdated=ge{{period.start}}"
+          - url: "http://pcm.fhir.health.gov.il/StructureDefinition/ext-allow-patient-bucket-change"
+            valueBoolean: true
+          - url: "http://pcm.fhir.health.gov.il/StructureDefinition/ext-information-bucket"
+            extension:
+              - url: "bucket"
+                valueCodeableConcept:
+                  coding:
+                    - system: "http://fhir.health.gov.il/cs/il-hdp-information-buckets"
+                      code: laboratoryTests
+                      display: "Laboratory tests"
+              - url: "historyDepth"
+                valueDuration:
+                  value: 2
+                  system: "http://unitsofmeasure.org"
+                  code: a
+                  unit: years
+          - url: "http://pcm.fhir.health.gov.il/StructureDefinition/ext-information-bucket"
+            extension:
+              - url: "bucket"
+                valueCodeableConcept:
+                  coding:
+                    - system: "http://fhir.health.gov.il/cs/il-hdp-information-buckets"
+                      code: medications
+                      display: "Medications"
+              - url: "historyDepth"
+                valueDuration:
+                  value: 1
+                  system: "http://unitsofmeasure.org"
+                  code: a
+                  unit: years
 
     ConsentRequest:
       summary: Consent request (submit)
@@ -2326,12 +2562,6 @@ components:
           - url: "http://pcm.fhir.health.gov.il/StructureDefinition/ext-pcm-service"
             valueReference:
               reference: "HealthcareService/svc-instance-hosp-a-cross-org-summary"
-        provision:
-          type: permit
-          purpose:
-            - system: "http://terminology.hl7.org/CodeSystem/v3-ActReason"
-              code: TREAT
-              display: "treatment"
     ConsentRequestCreated:
       summary: Consent request (created)
       value:
@@ -2856,28 +3086,45 @@ components:
             resource:
               resourceType: HealthcareService
               id: svc-catalog-cross-org-summary
+              identifier:
+                - use: official
+                  system: "http://pcm.fhir.health.gov.il/identifier/pcm-healthcareservice-catalog-id"
+                  value: "PCM-CAT-0101"
               name: "Cross-Organization Patient Summary"
           - search:
               mode: match
             resource:
               resourceType: HealthcareService
               id: svc-instance-hosp-a-cross-org-summary
+              identifier:
+                - use: official
+                  system: "http://pcm.fhir.health.gov.il/identifier/pcm-healthcareservice-instance-id"
+                  value: "PCM-HS-INST-0101"
               name: "Hospital A - Patient App / Cross-Org Summary"
 
-    VerificationResultSearchBundle:
-      summary: VerificationResult search bundle
+    OperationOutcomeMaterialCanonicalChange:
+      summary: Catalog update requires new service registration
       value:
-        resourceType: Bundle
-        id: bundle-verificationresult-search
-        type: searchset
-        total: 1
-        entry:
-          - search:
-              mode: match
-            resource:
-              resourceType: VerificationResult
-              id: approval-hmo-b-parent-for-hosp-a-instance
-              status: validated
+        resourceType: OperationOutcome
+        id: outcome-canonical-material-change
+        issue:
+          - severity: error
+            code: business-rule
+            details:
+              text: "Catalog update requires a new-service registration request."
+            diagnostics: "Changes to information buckets, patient-consent access parameters, tagged clinical data, or history depth are not applied to an existing active service. Submit a new full service-registration request."
+
+    OperationOutcomeCatalogUpdateAccepted:
+      summary: Catalog update accepted for asynchronous processing
+      value:
+        resourceType: OperationOutcome
+        id: outcome-catalog-update-accepted
+        issue:
+          - severity: information
+            code: informational
+            details:
+              text: "Catalog update request accepted for asynchronous processing."
+            diagnostics: "PCM accepted the requested catalog change for asynchronous processing. The active HealthcareService remains unchanged until the update is applied."
 
     OperationOutcomeBadRequest:
       summary: OperationOutcome - bad request

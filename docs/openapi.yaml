@@ -2,6 +2,9 @@ openapi: 3.1.0
 info:
   title: PCM API (FHIR + OAuth2)
   version: "2026-01-05"
+  license:
+    name: Apache-2.0
+    url: https://www.apache.org/licenses/LICENSE-2.0.html
   description: |
     Combined OpenAPI entry point that references the FHIR and OAuth2 specifications.
 servers:
@@ -16,11 +19,9 @@ tags:
   - name: Endpoint
     description: FHIR server endpoints for data sources.
   - name: HealthcareService
-    description: Canonical and instance service definitions.
+    description: Canonical catalog services and instance subscription services.
   - name: Consent
-    description: Consent requests and approvals. Deletion is not supported; service providers may only deactivate consents they created.
-  - name: VerificationResult
-    description: Approvals for service instances.
+    description: Consent requests and lifecycle updates. Deletion is not supported; service providers may only deactivate consents they created.
   - name: CapabilityStatement
     description: Server metadata and supported interactions.
   - name: SMART
@@ -28,9 +29,17 @@ tags:
   - name: OAuth2
     description: Token issuance and introspection.
 
+security:
+  - mtlsTransport: []
+    bearerAuth: []
+
 paths:
   /.well-known/smart-configuration:
     $ref: "./openapi-fhir.yaml#/paths/~1.well-known~1smart-configuration"
+  /.well-known/oauth-authorization-server:
+    $ref: "./openapi-oauth.yaml#/paths/~1.well-known~1oauth-authorization-server"
+  /.well-known/jwks.json:
+    $ref: "./openapi-oauth.yaml#/paths/~1.well-known~1jwks.json"
   /metadata:
     $ref: "./openapi-fhir.yaml#/paths/~1metadata"
   /Organization:
@@ -49,10 +58,6 @@ paths:
     $ref: "./openapi-fhir.yaml#/paths/~1Consent"
   /Consent/{id}:
     $ref: "./openapi-fhir.yaml#/paths/~1Consent~1{id}"
-  /VerificationResult:
-    $ref: "./openapi-fhir.yaml#/paths/~1VerificationResult"
-  /VerificationResult/{id}:
-    $ref: "./openapi-fhir.yaml#/paths/~1VerificationResult~1{id}"
   /token:
     $ref: "./openapi-oauth.yaml#/paths/~1token"
   /introspect:
